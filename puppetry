@@ -1,0 +1,75 @@
+#!/bin/sh
+
+help() {
+    CMD="$1"
+    if [ -z "$CMD" ]; then
+        echo "Usage: puppetry <command> [args]"
+        echo ""
+        echo "Commands:"
+        echo "\tpublish\t\tMake the latest state of a Puppet configuration repository available publicly"
+        echo "\tsubscribe\tKeep pulling and applying changes from a Puppet configuration reposito periodically"
+        echo "\tsync\t\tApply the changes of a Puppet configuration repository immediately"
+        echo "\tunsubscribe\tStop pulling changes from a Puppet configuration repository"
+    elif [ "$CMD" = "publish" ]; then
+        echo "Make the latest state of a Puppet configuration repository available publicly"
+        echo 
+        echo "Usage: puppetry publish <name> [<puppet_dir>]"
+        echo "Args:"
+        echo "\tname\t\tThe name of the to-be-published configuration repository"
+        echo "\tpuppet_dir\tThe directory where the Puppet configuration resides"
+    elif [ "$CMD" = "subscribe" ]; then
+        echo "Keep pulling and applying changes from a Puppet configuration reposito periodically"
+        echo 
+        echo "Usage: puppetry subscribe <name> <host> [<period>]"
+        echo "Args:"
+        echo "\tname\t\tThe name of the published configuration repository"
+        echo "\thost\t\tThe host where the published configuration repository resides"
+        echo "\tperiod\t\tThe intervals between updates"
+    elif [ "$CMD" = "sync" ]; then
+        echo "Apply the changes of a Puppet configuration repository immediately"
+        echo 
+        echo "Usage: puppetry sync <name>"
+    elif [ "$CMD" = "unsubscribe" ]; then
+        echo "Stop pulling changes from a Puppet configuration repository"
+        echo 
+        echo "Usage: puppetry unsubscribe <name>"
+    else
+        error_invalid_command "$CMD"
+    fi
+}
+
+error_invalid_command() {
+    CMD="$1"
+    echo "Error: $CMD is not valid command!"
+    echo
+    help
+}
+
+# Show help messages if no argument is given
+COMMAND="$1"
+if [ -z "$COMMAND" ]; then
+    help
+    exit 1
+fi
+
+shift
+case $COMMAND in
+help)
+    COMMAND="$1"
+    help $COMMAND
+    ;;
+publish)
+    REPR_NAME="$1"
+    PUPPET_DIR="$2"
+    echo "publish name = $REPR_NAME, dir = $PUPPET_DIR"
+    ;;
+subscribe)
+    ;;
+sync)
+    ;;
+unsubscribe)
+    ;;
+*)
+    error_invalid_command $COMMAND
+    ;;
+esac

@@ -1,40 +1,41 @@
 #!/bin/sh
+# Puppetry - Distributed Puppet Powered by Git
 
 help() {
-    CMD="$1"
-    if [ -z "$CMD" ]; then
-        echo "Usage: puppetry <command> [args]"
+    OPERATION="$1"
+    if [ -z "$OPERATION" ]; then
+        echo "Usage: puppetry <operation> <repository> [args]"
         echo ""
-        echo "Commands:"
+        echo "Operation:"
         echo "\tpublish\t\tMake the latest state of a Puppet configuration repository available publicly"
         echo "\tsubscribe\tKeep pulling and applying changes from a Puppet configuration reposito periodically"
         echo "\tsync\t\tApply the changes of a Puppet configuration repository immediately"
         echo "\tunsubscribe\tStop pulling changes from a Puppet configuration repository"
-    elif [ "$CMD" = "publish" ]; then
-        echo "Make the latest state of a Puppet configuration repository available publicly"
+    elif [ "$OPERATION" = "publish" ]; then
+        echo "publish - Make the latest state of a Puppet configuration repository available publicly"
         echo 
-        echo "Usage: puppetry publish <name> [<puppet_dir>]"
+        echo "Usage: puppetry publish <repository> [<puppet_dir>]"
         echo "Args:"
-        echo "\tname\t\tThe name of the to-be-published configuration repository"
+        echo "\trepository\t\tThe name of the to-be-published configuration repository"
         echo "\tpuppet_dir\tThe directory where the Puppet configuration resides"
-    elif [ "$CMD" = "subscribe" ]; then
-        echo "Keep pulling and applying changes from a Puppet configuration reposito periodically"
+    elif [ "$OPERATION" = "subscribe" ]; then
+        echo "subscribe - Keep pulling and applying changes from a Puppet configuration reposito periodically"
         echo 
-        echo "Usage: puppetry subscribe <name> <host> [<period>]"
+        echo "Usage: puppetry subscribe <repository> <host> [<period>]"
         echo "Args:"
-        echo "\tname\t\tThe name of the published configuration repository"
+        echo "\trepository\t\tThe name of the published configuration repository"
         echo "\thost\t\tThe host where the published configuration repository resides"
         echo "\tperiod\t\tThe intervals between updates"
-    elif [ "$CMD" = "sync" ]; then
-        echo "Apply the changes of a Puppet configuration repository immediately"
+    elif [ "$OPERATION" = "sync" ]; then
+        echo "sync - Apply the changes of a Puppet configuration repository immediately"
         echo 
-        echo "Usage: puppetry sync <name>"
-    elif [ "$CMD" = "unsubscribe" ]; then
-        echo "Stop pulling changes from a Puppet configuration repository"
+        echo "Usage: puppetry sync <repository>"
+    elif [ "$OPERATION" = "unsubscribe" ]; then
+        echo "unsubscribe - Stop pulling changes from a Puppet configuration repository"
         echo 
-        echo "Usage: puppetry unsubscribe <name>"
+        echo "Usage: puppetry unsubscribe <repository>"
     else
-        error_invalid_command "$CMD"
+        error_invalid_command "$OPERATION"
     fi
 }
 
@@ -45,31 +46,107 @@ error_invalid_command() {
     help
 }
 
-# Show help messages if no argument is given
-COMMAND="$1"
-if [ -z "$COMMAND" ]; then
+# Suppress debug messsage
+if [ -z "$PUPPETRY_DEBUG" ]; then
+    MUTE=""
+else       
+    MUTE=""
+fi
+
+
+# Get operation
+OPERATION="$1"
+if [ -z "$OPERATION" ]; then
     help
     exit 1
 fi
-
 shift
-case $COMMAND in
-help)
-    COMMAND="$1"
-    help $COMMAND
-    ;;
+
+# Get the name of repository
+NAME=$1
+if [ -z "$NAME" ]; then
+    echo "Error: missing the name of repository"
+    help
+    exit 1
+fi
+shift
+
+# User and his home directory
+USER=puppetry
+HOME=/var/puppetry
+
+# Process different operations
+case $OPERATION in
 publish)
-    REPR_NAME="$1"
-    PUPPET_DIR="$2"
-    echo "publish name = $REPR_NAME, dir = $PUPPET_DIR"
+    TARGET_DIR="$HOME/$NAME.published"
+
+    PUPPET_DIR="$1"
+    # If the source directory is given, this should be new repository
+    if [ -n "$PUPPET_DIR" ]; then
+        # Check the source directory is controlled by Git and Puppet
+        if [ ! -d "$PUPPET_DIR" ]; then
+            echo "Error: the source directory of Puppet configuration doesn't exit."
+            exit 1
+        fi
+        PUPPET_DIR=`realpath "$PUPPET_DIR"`
+        cd "$PUPPET_DIR"
+        if [ ! -d ".git" ]; then
+            echo "Error: the source directory of Puppet configuration is not source controlled by Git."
+            exit 1
+        fi
+        if [ ! -f "apply" ]; then
+            echo "Error: expect apply script in the source directory of Puppet configuration."
+            exit 1
+        fi
+
+        sudo rm -rf "$TARGET_DIR"
+        sudo git clone "$PUPPET_DIR" "$TARGET_DIR"  >/dev/null 2>&1
+        sudo chown -R $USER:$USER "$TARGET_DIR"
+    fi
+    sudo su - $USER -c "cd $TARGET_DIR && git pull" >/dev/null 2>&1
     ;;
 subscribe)
+    # Get host
+    HOST="$1"
+    if [ -z "$HOST" ]; then
+       echo "Error: the host of Puppet configuration repository is not given." 
+       exit 1
+    fi
+    # Get period as optional argument
+    PERIOD="$2"
+
+    if [ -d "$HOME/$NAME.subscribed" ]; then
+        echo "Warning: a Puppet configuration repository named $NAME has been subscribed. You don't need to subscribe it again."
+        exit 1
+    fi
+    sudo su - $USER -c "git clone \"$HOST:$HOME/$NAME.published\" \"$NAME.subscribed\"" >/dev/null 2>&1
+
+    # TODO: Add a cron job
     ;;
 sync)
+    if [ ! -d "$HOME/$NAME.subscribed" ]; then
+        echo "Error: no Puppet configuration repository named $NAME has been subscribed."
+        exit 1
+    fi
+    
+    sudo su - $USER -c "cd \"$NAME.subscribed\" && git pull" >/dev/null 2>&1
+    cd "$HOME/$NAME.subscribed"
+    sudo ./apply
     ;;
 unsubscribe)
+    if [ ! -d "$HOME/$NAME.subscribed" ]; then
+        echo "Error: no Puppet configuration repository named $NAME has been subscribed."
+        exit 1
+    fi
+    
+    sudo su -c "rm -rf $HOME/$NAME.subscribed"
+    # TODO: remove the cron job
+    ;;
+help)
+    OPERATION=$1 
+    help $OPERATION
     ;;
 *)
-    error_invalid_command $COMMAND
+    error_invalid_command $OPERATION
     ;;
 esac

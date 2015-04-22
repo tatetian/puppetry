@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Puppetry - Distributed Puppet Powered by Git
 
 help() {
@@ -25,7 +25,7 @@ help() {
         echo "Args:"
         echo "\trepository\t\tThe name of the published configuration repository"
         echo "\thost\t\tThe host where the published configuration repository resides"
-        echo "\tperiod\t\tThe intervals between updates"
+        echo "\tperiod\t\tThe intervals between updates (in minutes)"
     elif [ "$OPERATION" = "sync" ]; then
         echo "sync - Apply the changes of a Puppet configuration repository immediately"
         echo 
@@ -44,6 +44,20 @@ error_invalid_command() {
     echo "Error: $CMD is not valid command!"
     echo
     help
+}
+
+cron_add() {
+    local name=$1
+    local period=$2
+    local puppetry_bin=`which puppetry`
+    job="*/$period * * * * $puppetry_bin sync $name >/dev/null 2>&1"
+    (sudo crontab -l; echo "$job") | sudo crontab - >/dev/null 2>&1
+}
+
+cron_remove() {
+    local name=$1
+    removed_job="puppetry sync $name"
+    sudo crontab -l | grep -v "$removed_job" | sudo crontab - >/dev/null 2>&1
 }
 
 # Suppress debug messsage
@@ -67,6 +81,10 @@ NAME=$1
 if [ -z "$NAME" ]; then
     echo "Error: missing the name of repository"
     help
+    exit 1
+fi
+if [[ ! "$NAME" =~ ^[a-zA-Z_0-9]+$ ]]; then
+    echo "Error: the name of the repository is not in a valid format."
     exit 1
 fi
 shift
@@ -112,16 +130,25 @@ subscribe)
        echo "Error: the host of Puppet configuration repository is not given." 
        exit 1
     fi
-    # Get period as optional argument
-    PERIOD="$2"
+    # Get period as optional argument, default set to 5min
+    PERIOD="${2:-5}"
+    if [[ ! "$PERIOD" =~ ^[0-9]+$ ]] ; then
+        echo "Error: the period (in minutes) must be a positive integer."
+        exit 1
+    fi
 
     if [ -d "$HOME/$NAME.subscribed" ]; then
         echo "Warning: a Puppet configuration repository named $NAME has been subscribed. You don't need to subscribe it again."
         exit 1
     fi
     sudo su - $USER -c "git clone \"$HOST:$HOME/$NAME.published\" \"$NAME.subscribed\"" >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo "Error: the git repository $NAME on $HOST doesn't exist or cannot be accessed."
+        exit 1
+    fi
 
-    # TODO: Add a cron job
+    cron_remove $NAME
+    cron_add $NAME $PERIOD
     ;;
 sync)
     if [ ! -d "$HOME/$NAME.subscribed" ]; then
@@ -130,8 +157,16 @@ sync)
     fi
     
     sudo su - $USER -c "cd \"$NAME.subscribed\" && git pull" >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo "Error: Git failed to pull changes."
+        exit 1
+    fi
     cd "$HOME/$NAME.subscribed"
     sudo ./apply
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to apply configuration changes."
+        exit 1
+    fi
     ;;
 unsubscribe)
     if [ ! -d "$HOME/$NAME.subscribed" ]; then
@@ -140,7 +175,7 @@ unsubscribe)
     fi
     
     sudo su -c "rm -rf $HOME/$NAME.subscribed"
-    # TODO: remove the cron job
+    cron_remove $NAME
     ;;
 help)
     OPERATION=$1 
